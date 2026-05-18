@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent } from "react";
 import { emit, listen } from "@tauri-apps/api/event";
+import { open } from "@tauri-apps/plugin-dialog";
 import { exportMarkdownNote, importMarkdownNote } from "../features/importExport/api";
 import { MarkdownPreview } from "../features/markdown/MarkdownPreview";
 import {
@@ -14,6 +15,7 @@ import { normalizeTileColor } from "../features/settings/tileColor";
 import { SettingsPanel } from "./SettingsPanel";
 import { SlidingButtonGroup } from "./SlidingButtonGroup";
 import {
+  copyAssetFile,
   createNote,
   createCategory,
   deleteCategory,
@@ -23,9 +25,12 @@ import {
   getNote,
   listCategories,
   listNotes,
+  listTags,
   moveNoteCategory,
+  openInExplorer,
   readExternalFile,
   renameCategory,
+  saveAssetBytes,
   saveExternalFile,
   updateNote,
 } from "../features/notes/api";
@@ -75,7 +80,7 @@ const saveStateLabel: Record<SaveState, string> = {
   error: "保存失败",
 };
 
-type FormatAction = "bold" | "italic" | "heading" | "hr" | "ul" | "ol" | "code" | "quote" | "inlineMath" | "blockMath";
+type FormatAction = "bold" | "italic" | "heading" | "hr" | "ul" | "ol" | "code" | "quote" | "inlineMath" | "blockMath" | "image" | "link";
 
 const toolbarButtons: { label: string; title: string; style: string; action: FormatAction }[] = [
   { label: "B", title: "粗体", style: "font-bold", action: "bold" },
@@ -87,7 +92,9 @@ const toolbarButtons: { label: string; title: string; style: string; action: For
   { label: "<>", title: "代码", style: "font-mono text-[9px]", action: "code" },
   { label: "❝", title: "引用", style: "", action: "quote" },
   { label: "∑", title: "行内公式", style: "font-mono text-[11px]", action: "inlineMath" },
-  { label: "∫", title: "块级公式", style: "font-mono text-[11px]", action: "blockMath" },
+  { label: "∫", title: "块级公式", style: "font-mono text-[13px]", action: "blockMath" },
+  { label: "", title: "插入图片", style: "", action: "image" },
+  { label: "", title: "插入链接", style: "", action: "link" },
 ];
 
 function applyFormat(
@@ -225,6 +232,8 @@ function applyFormat(
       cursorEnd = cursorStart + (selected || "x^2 + y^2 = r^2").length;
       break;
     }
+    default:
+      return;
   }
 
   setContent(result);
@@ -295,6 +304,11 @@ export function MainWindow({
   const [categoryMenu, setCategoryMenu] = useState<CategoryMenuState | null>(null);
   const [categoryMenuClosing, setCategoryMenuClosing] = useState(false);
   const [categoryMenuConfirmDelete, setCategoryMenuConfirmDelete] = useState(false);
+  const [tags, setTags] = useState<string[]>([]);
+  const [allTags, setAllTags] = useState<string[]>([]);
+  const [selectedTag, setSelectedTag] = useState<string>("");
+  const [tagInput, setTagInput] = useState("");
+  const [showTagInput, setShowTagInput] = useState(false);
   const contentRef = useRef<HTMLTextAreaElement>(null);
   const externalFileMtimeRef = useRef<number>(0);
   const lastExternalSaveRef = useRef<number>(0);
@@ -317,8 +331,14 @@ export function MainWindow({
   );
 
   const filteredNotes = useMemo(
-    () => filterNotes(notes, searchQuery),
-    [notes, searchQuery],
+    () => {
+      let result = filterNotes(notes, searchQuery);
+      if (selectedTag) {
+        result = result.filter((note) => (note.tags || []).includes(selectedTag));
+      }
+      return result;
+    },
+    [notes, searchQuery, selectedTag],
   );
 
   const categoryGroups = useMemo(
@@ -337,6 +357,7 @@ export function MainWindow({
     setSelectedId(note.id);
     setTitle(note.title);
     setContent(note.content);
+    setTags(note.tags || []);
     setSaveState("saved");
     setErrorMessage(null);
     setNoteTransitionKey((k) => k + 1);
@@ -366,12 +387,14 @@ export function MainWindow({
   );
 
   const refreshNotes = useCallback(async () => {
-    const [loadedNotes, loadedCategories] = await Promise.all([
+    const [loadedNotes, loadedCategories, loadedTags] = await Promise.all([
       listNotes(),
       listCategories(),
+      listTags(),
     ]);
     setNotes(loadedNotes);
     setCategories(loadedCategories);
+    setAllTags(loadedTags);
     return loadedNotes;
   }, []);
 
@@ -379,6 +402,7 @@ export function MainWindow({
     setSelectedId(null);
     setTitle("");
     setContent("");
+    setTags([]);
     setSaveState("idle");
   }, []);
 
@@ -571,7 +595,7 @@ export function MainWindow({
     setSaveState("saving");
     try {
       const category = selectedNote?.category ?? "";
-      const note = await updateNote(selectedId, { title, content, category });
+      const note = await updateNote(selectedId, { title, content, category, tags });
       replaceNoteMetadata(note);
       setSaveState("saved");
       setErrorMessage(null);
@@ -581,7 +605,7 @@ export function MainWindow({
       setErrorMessage(getErrorMessage(error));
       return null;
     }
-  }, [content, isExternal, replaceNoteMetadata, selectedExternalFile, selectedId, selectedNote, title]);
+  }, [content, isExternal, replaceNoteMetadata, selectedExternalFile, selectedId, selectedNote, tags, title]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -613,13 +637,155 @@ export function MainWindow({
   const handleNewNote = async () => {
     setErrorMessage(null);
     try {
-      const note = await createNote({ title: "", content: "", category: activeCategory });
+      const note = await createNote({ title: "", content: "", category: activeCategory, tags: [] });
       replaceNoteMetadata(note);
       applyNote(note);
     } catch (error) {
       setErrorMessage(getErrorMessage(error));
     }
   };
+
+  const handleInsertImage = useCallback(async () => {
+    const filePath = await open({
+      multiple: false,
+      directory: false,
+      filters: [{ name: "图片", extensions: ["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"] }],
+    });
+    if (typeof filePath !== "string") return;
+
+    setErrorMessage(null);
+    try {
+      const relativePath = await copyAssetFile(filePath);
+      const imageMd = `\n![图片](${relativePath})\n`;
+      setContent((prev) => prev + imageMd);
+      markDirty();
+    } catch (error) {
+      setErrorMessage(getErrorMessage(error));
+    }
+  }, []);
+
+  const handleImagePaste = useCallback(async (file: File) => {
+    if (!file.type.startsWith("image/")) return false;
+    setErrorMessage(null);
+    try {
+      const buffer = await file.arrayBuffer();
+      const bytes = Array.from(new Uint8Array(buffer));
+      const relativePath = await saveAssetBytes(file.name, bytes);
+      const imageMd = `![${file.name}](${relativePath})`;
+      if (contentRef.current) {
+        const { selectionStart: start, selectionEnd: end } = contentRef.current;
+        const before = content.slice(0, start);
+        const after = content.slice(end);
+        const newContent = before + imageMd + after;
+        setContent(newContent);
+        markDirty();
+        requestAnimationFrame(() => {
+          contentRef.current?.focus();
+          const cursorPos = start + imageMd.length;
+          contentRef.current?.setSelectionRange(cursorPos, cursorPos);
+        });
+      } else {
+        setContent((prev) => prev + "\n" + imageMd + "\n");
+        markDirty();
+      }
+      return true;
+    } catch (error) {
+      setErrorMessage(getErrorMessage(error));
+      return false;
+    }
+  }, [content]);
+
+  const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key !== "Enter") return;
+    const textarea = event.currentTarget;
+    const { selectionStart: cursor } = textarea;
+    const lineStart = textarea.value.lastIndexOf("\n", cursor - 1) + 1;
+    const currentLine = textarea.value.slice(lineStart, cursor);
+
+    const ulMatch = currentLine.match(/^(\s*)([-*+])\s+(.+)/);
+    const olMatch = currentLine.match(/^(\s*)(\d+)[.)]\s+(.+)/);
+
+    if (ulMatch || olMatch) {
+      event.preventDefault();
+      const indent = ulMatch ? ulMatch[1] : olMatch![1];
+
+      if (ulMatch && ulMatch[3].trim() === "") {
+        const before = textarea.value.slice(0, lineStart);
+        const after = textarea.value.slice(cursor);
+        const newContent = before + after;
+        setContent(newContent);
+        markDirty();
+        requestAnimationFrame(() => {
+          textarea.focus();
+          textarea.setSelectionRange(lineStart, lineStart);
+        });
+        return;
+      }
+      if (olMatch && olMatch[3].trim() === "") {
+        const before = textarea.value.slice(0, lineStart);
+        const after = textarea.value.slice(cursor);
+        const newContent = before + after;
+        setContent(newContent);
+        markDirty();
+        requestAnimationFrame(() => {
+          textarea.focus();
+          textarea.setSelectionRange(lineStart, lineStart);
+        });
+        return;
+      }
+
+      let newLine: string;
+      if (ulMatch) {
+        newLine = `\n${indent}${ulMatch[2]} `;
+      } else {
+        const num = parseInt(olMatch![2], 10);
+        newLine = `\n${indent}${num + 1}. `;
+      }
+
+      const before = textarea.value.slice(0, cursor);
+      const after = textarea.value.slice(cursor);
+      const newContent = before + newLine + after;
+      const newCursor = cursor + newLine.length;
+      setContent(newContent);
+      markDirty();
+      requestAnimationFrame(() => {
+        textarea.focus();
+        textarea.setSelectionRange(newCursor, newCursor);
+      });
+    }
+  }, []);
+
+  const handleAddTag = useCallback(() => {
+    const trimmed = tagInput.trim();
+    if (!trimmed || tags.includes(trimmed)) {
+      setTagInput("");
+      setShowTagInput(false);
+      return;
+    }
+    const newTags = [...tags, trimmed];
+    setTags(newTags);
+    setTagInput("");
+    setShowTagInput(false);
+    markDirty();
+  }, [tagInput, tags]);
+
+  const handleRemoveTag = useCallback((tagToRemove: string) => {
+    setTags((prev) => prev.filter((t) => t !== tagToRemove));
+    markDirty();
+  }, []);
+
+  const handleTagKeyDown = useCallback((event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      handleAddTag();
+    } else if (event.key === "Escape") {
+      setTagInput("");
+      setShowTagInput(false);
+    } else if (event.key === "Backspace" && tagInput === "" && tags.length > 0) {
+      setTags((prev) => prev.slice(0, -1));
+      markDirty();
+    }
+  }, [handleAddTag, tagInput, tags]);
 
   const handleOpenSettings = async () => {
     if (settingsOpen) {
@@ -854,6 +1020,15 @@ export function MainWindow({
       return;
     }
 
+    if (action === "openInExplorer") {
+      setNoteMenuClosing(true);
+      setErrorMessage(null);
+      void openInExplorer(note.id).catch((error) => {
+        setErrorMessage(getErrorMessage(error));
+      });
+      return;
+    }
+
     setNoteMenuClosing(true);
     void handleDeleteNote(note.id);
   };
@@ -931,6 +1106,23 @@ export function MainWindow({
   const markDirty = () => {
     if (selectedId) setSaveState("dirty");
   };
+
+  const handleInsertLink = useCallback(() => {
+    if (!contentRef.current) return;
+    const { selectionStart: start, selectionEnd: end, value } = contentRef.current;
+    const selected = value.slice(start, end);
+    const linkMd = selected ? `[${selected}](https://)` : "[链接文字](https://)";
+    const newContent = value.slice(0, start) + linkMd + value.slice(end);
+    setContent(newContent);
+    const cursorPos = start + linkMd.length;
+    setTimeout(() => {
+      if (contentRef.current) {
+        contentRef.current.focus();
+        contentRef.current.setSelectionRange(cursorPos - 1, cursorPos - 1);
+      }
+    }, 0);
+    markDirty();
+  }, [markDirty]);
 
   const handleUndo = () => {
     if (!selectedId) return;
@@ -1030,11 +1222,11 @@ export function MainWindow({
         >
           <div className="flex items-center gap-3 min-w-0">
             <span className="text-[13px] font-display font-medium text-ink-soft tracking-wide">
-              花笺
+              拾芥
             </span>
             <span className="text-[11px] text-ink-ghost font-body">—</span>
             <span className="text-[11px] text-ink-faint font-body truncate max-w-[240px]">
-              {title || selectedNote?.preview || "无标题笔记"}
+              {title || selectedNote?.preview || "无标题便签"}
             </span>
           </div>
           <div className="flex items-center">
@@ -1147,8 +1339,8 @@ export function MainWindow({
                   type="text"
                   value={searchQuery}
                   onChange={(event) => setSearchQuery(event.target.value)}
-                  placeholder="搜索笔记…"
-                  className="flex-1 text-[12px] font-body text-ink placeholder:text-ink-ghost/60 bg-transparent"
+                  placeholder="搜索便签…"
+                  className="flex-1 text-[13px] font-body text-ink placeholder:text-ink-ghost/60 bg-transparent"
                 />
                 {searchQuery && (
                   <button
@@ -1170,12 +1362,12 @@ export function MainWindow({
                   </button>
                 )}
               </div>
-            </div>
+              </div>
 
             <div className="px-3 pb-2 shrink-0 space-y-1">
               <button
                 onClick={handleNewNote}
-                className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[12px] font-body text-bamboo hover:bg-bamboo-mist/60 transition-all cursor-pointer group"
+                className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[13px] font-body text-bamboo hover:bg-bamboo-mist/60 transition-all cursor-pointer group"
               >
                 <svg
                   width="13"
@@ -1189,11 +1381,11 @@ export function MainWindow({
                 >
                   <path d="M12 5v14M5 12h14" />
                 </svg>
-                <span>新建笔记</span>
+                <span>新建便签</span>
               </button>
               <button
                 onClick={() => void handleImportNote()}
-                className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[12px] font-body text-ink-faint hover:text-bamboo hover:bg-bamboo-mist/50 transition-all cursor-pointer group"
+                className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[13px] font-body text-ink-faint hover:text-bamboo hover:bg-bamboo-mist/50 transition-all cursor-pointer group"
               >
                 <svg
                   width="13"
@@ -1214,12 +1406,12 @@ export function MainWindow({
             </div>
 
             <div className="flex items-center justify-between px-5 pb-1.5 shrink-0">
-              <span className="text-[10px] text-ink-ghost font-mono tracking-wider uppercase">
-                {filteredNotes.length} 篇笔记{externalFiles.length > 0 ? ` · ${externalFiles.length} 个外部文件` : ""}
+              <span className="text-[11px] text-ink-ghost font-mono tracking-wider uppercase">
+                {filteredNotes.length} 篇便签{externalFiles.length > 0 ? ` · ${externalFiles.length} 个外部文件` : ""}
               </span>
               <button
                 onClick={() => setShowCategoryInput(true)}
-                className="text-[10px] text-ink-ghost hover:text-bamboo transition-colors cursor-pointer"
+                className="text-[11px] text-ink-ghost hover:text-bamboo transition-colors cursor-pointer"
                 title="新建分类"
               >
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
@@ -1244,7 +1436,7 @@ export function MainWindow({
                   }}
                   onBlur={() => void handleCreateCategory()}
                   placeholder="输入分类名…"
-                  className="w-full px-2.5 h-7 rounded-lg text-[12px] font-body text-ink bg-paper-warm/80 border border-paper-deep/40 focus:border-bamboo/30 placeholder:text-ink-ghost/60"
+                  className="w-full px-2.5 h-7 rounded-lg text-[13px] font-body text-ink bg-paper-warm/80 border border-paper-deep/40 focus:border-bamboo/30 placeholder:text-ink-ghost/60"
                 />
               </div>
             )}
@@ -1253,7 +1445,7 @@ export function MainWindow({
               <div className="space-y-0.5">
                 {externalFiles.length > 0 && (
                   <>
-                    <div className="px-3 py-1.5 text-[10px] text-ink-ghost/50 font-mono tracking-wider uppercase">
+                    <div className="px-3 py-1.5 text-[11px] text-ink-ghost/60 font-mono tracking-wider uppercase">
                       外部文件
                     </div>
                     {externalFiles.map((file) => {
@@ -1280,7 +1472,7 @@ export function MainWindow({
 
                           <div className="flex items-baseline justify-between mb-0.5">
                             <span
-                              className={`text-[13px] font-display font-medium truncate pr-2 transition-colors flex items-center gap-1.5 ${
+                              className={`text-[14px] font-display font-medium truncate pr-2 transition-colors flex items-center gap-1.5 ${
                                 isSelected ? "text-bamboo" : "text-ink-soft"
                               }`}
                             >
@@ -1305,7 +1497,7 @@ export function MainWindow({
                             </button>
                           </div>
 
-                          <p className="text-[11px] text-ink-ghost leading-relaxed line-clamp-2 group-hover:text-ink-faint transition-colors pl-[18px]">
+                          <p className="text-[12px] text-ink-ghost leading-relaxed line-clamp-2 group-hover:text-ink-faint transition-colors pl-[18px]">
                             {file.filePath}
                           </p>
                         </button>
@@ -1368,24 +1560,24 @@ export function MainWindow({
                                 isSelected ? "h-5 opacity-100" : "h-0 opacity-0"
                               }`} />
                               <div className="flex items-baseline justify-between mb-0.5">
-                                <span className={`text-[13px] font-display font-medium truncate pr-2 transition-colors ${
+                                <span className={`text-[14px] font-display font-medium truncate pr-2 transition-colors ${
                                   isSelected ? "text-bamboo" : "text-ink-soft"
                                 }`}>
                                   {getDisplayTitle(note)}
                                 </span>
-                                <span className="text-[10px] text-ink-ghost font-mono tabular-nums shrink-0">
+                                <span className="text-[11px] text-ink-ghost font-mono tabular-nums shrink-0">
                                   {formatShortDate(note.updatedAt)}
                                 </span>
                               </div>
-                              <p className="text-[11px] text-ink-ghost leading-relaxed line-clamp-2 group-hover:text-ink-faint transition-colors">
-                                {note.preview || "空白笔记"}
+                              <p className="text-[12px] text-ink-ghost leading-relaxed line-clamp-2 group-hover:text-ink-faint transition-colors">
+                                {note.preview || "空白便签"}
                               </p>
                               <div className="flex items-center gap-2 mt-1">
-                                <span className="text-[10px] text-ink-ghost/60 font-mono tabular-nums">
+                                <span className="text-[11px] text-ink-ghost/60 font-mono tabular-nums">
                                   {formatTime(note.updatedAt)}
                                 </span>
-                                <span className="text-[10px] text-ink-ghost/40">·</span>
-                                <span className="text-[10px] text-ink-ghost/60 font-mono tabular-nums">
+                                <span className="text-[11px] text-ink-ghost/40">·</span>
+                                <span className="text-[11px] text-ink-ghost/60 font-mono tabular-nums">
                                   {note.wordCount} 字
                                 </span>
                               </div>
@@ -1399,9 +1591,9 @@ export function MainWindow({
                   const isCollapsed = collapsedCategories.has(group.category);
 
                   return (
-                    <div key={group.category} className="px-2 mb-1.5">
+                    <div key={group.category} className="px-2 mb-2">
                       <div
-                        className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg group/cat cursor-pointer select-none transition-all duration-200 ${
+                        className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg group/cat cursor-pointer select-none transition-all duration-200 ${
                           dragOverCategory === group.category
                             ? "bg-bamboo/15 border border-bamboo/40 ring-1 ring-bamboo/20"
                             : isCollapsed
@@ -1468,21 +1660,21 @@ export function MainWindow({
                             }}
                             onBlur={() => void handleRenameCategory(group.category)}
                             onClick={(e) => e.stopPropagation()}
-                            className="flex-1 min-w-0 px-1 text-[10px] font-mono text-ink bg-paper-warm/80 border border-bamboo/30 rounded"
+                            className="flex-1 min-w-0 px-1 text-[11px] font-mono text-ink bg-paper-warm/80 border border-bamboo/30 rounded"
                           />
                         ) : (
-                          <span className="text-[11px] text-bamboo/70 font-medium truncate">
+                          <span className="text-[12px] text-bamboo/70 font-medium truncate">
                             {group.category}
                           </span>
                         )}
-                        <span className="text-[9px] text-bamboo/40 font-mono ml-auto shrink-0">
+                        <span className="text-[10px] text-bamboo/40 font-mono ml-auto shrink-0">
                           {group.notes.length}
                         </span>
                       </div>
 
                       <div className={`category-body ${isCollapsed ? "" : "expanded"}`}>
                         <div
-                          className="category-body-inner bg-bamboo/[0.03] border border-t-0 border-bamboo/10 rounded-b-lg pb-1 pt-1"
+                          className="category-body-inner bg-bamboo/[0.03] border border-t-0 border-bamboo/10 rounded-b-lg pb-0.5 pt-0.5"
                           onDragOver={(e) => {
                             e.preventDefault();
                             e.dataTransfer.dropEffect = "move";
@@ -1501,7 +1693,7 @@ export function MainWindow({
                           }}
                         >
                           {group.notes.length === 0 ? (
-                            <div className="px-3 py-3 text-center text-[11px] text-ink-ghost/50">
+                            <div className="px-3 py-3 text-center text-[12px] text-ink-ghost/60">
                               空文件夹
                             </div>
                           ) : group.notes.map((note) => {
@@ -1535,27 +1727,27 @@ export function MainWindow({
 
                                 <div className="flex items-baseline justify-between mb-0.5">
                                   <span
-                                    className={`text-[13px] font-display font-medium truncate pr-2 transition-colors ${
+                                    className={`text-[14px] font-display font-medium truncate pr-2 transition-colors ${
                                       isSelected ? "text-bamboo" : "text-ink-soft"
                                     }`}
                                   >
                                     {getDisplayTitle(note)}
                                   </span>
-                                  <span className="text-[10px] text-ink-ghost font-mono tabular-nums shrink-0">
+                                  <span className="text-[11px] text-ink-ghost font-mono tabular-nums shrink-0">
                                     {formatShortDate(note.updatedAt)}
                                   </span>
                                 </div>
 
-                                <p className="text-[11px] text-ink-ghost leading-relaxed line-clamp-2 group-hover:text-ink-faint transition-colors">
-                                  {note.preview || "空白笔记"}
+                                <p className="text-[12px] text-ink-ghost leading-relaxed line-clamp-2 group-hover:text-ink-faint transition-colors">
+                                  {note.preview || "空白便签"}
                                 </p>
 
                                 <div className="flex items-center gap-2 mt-1">
-                                  <span className="text-[10px] text-ink-ghost/60 font-mono tabular-nums">
+                                  <span className="text-[11px] text-ink-ghost/60 font-mono tabular-nums">
                                     {formatTime(note.updatedAt)}
                                   </span>
-                                  <span className="text-[10px] text-ink-ghost/40">·</span>
-                                  <span className="text-[10px] text-ink-ghost/60 font-mono tabular-nums">
+                                  <span className="text-[11px] text-ink-ghost/40">·</span>
+                                  <span className="text-[11px] text-ink-ghost/60 font-mono tabular-nums">
                                     {note.wordCount} 字
                                   </span>
                                 </div>
@@ -1570,11 +1762,52 @@ export function MainWindow({
 
                 {!isLoading && filteredNotes.length === 0 && externalFiles.length === 0 && (
                   <div className="px-3 py-8 text-center text-[12px] text-ink-ghost leading-relaxed">
-                    {searchQuery ? "没有匹配的笔记" : "还没有笔记"}
+                    {searchQuery ? "没有匹配的便签" : "还没有便签"}
                   </div>
                 )}
               </div>
             </div>
+
+            {allTags.length > 0 && (
+              <div className="px-3 pb-3 pt-2 shrink-0 border-t border-paper-deep/20 bg-paper/30">
+                <div className="px-1 py-1 text-[11px] text-ink-faint font-body tracking-wider">
+                  标签
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  <button
+                    onClick={() => setSelectedTag("")}
+                    className={`px-2 py-0.5 rounded-full text-[11px] font-mono transition-colors cursor-pointer ${
+                      selectedTag === ""
+                        ? "bg-bamboo text-cloud"
+                        : "bg-paper-warm text-ink-ghost hover:text-ink-faint hover:bg-paper-deep/60"
+                    }`}
+                  >
+                    全部
+                  </button>
+                  {allTags.map((tag) => (
+                    <button
+                      key={tag}
+                      onClick={() => setSelectedTag(selectedTag === tag ? "" : tag)}
+                      className={`px-2 py-0.5 rounded-full text-[11px] font-mono transition-colors cursor-pointer ${
+                        selectedTag === tag
+                          ? "bg-bamboo text-cloud"
+                          : "bg-paper-warm text-ink-ghost hover:text-ink-faint hover:bg-paper-deep/60"
+                      }`}
+                    >
+                      {tag}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {allTags.length === 0 && (
+              <div className="px-3 pb-3 pt-2 shrink-0 border-t border-paper-deep/20 bg-paper/30">
+                <div className="px-1 py-1 text-[11px] text-ink-ghost/50 font-body tracking-wider">
+                  标签 · 暂无
+                </div>
+              </div>
+            )}
           </div>
 
           {!sidebarCollapsed && (
@@ -1663,10 +1896,14 @@ export function MainWindow({
                 <button
                   onClick={() => void saveCurrentNote()}
                   disabled={!selectedId || saveState === "saving"}
-                  className="px-2.5 h-7 flex items-center justify-center rounded-lg text-[11px] text-ink-ghost hover:text-ink-faint hover:bg-paper-warm transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                  className="px-2.5 h-7 flex items-center justify-center rounded-lg text-ink-ghost hover:text-ink-faint hover:bg-paper-warm transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
                   title="保存"
                 >
-                  保存
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                    <polyline points="17 21 17 13 7 13 7 21" />
+                    <polyline points="7 3 7 8 15 8" />
+                  </svg>
                 </button>
 
                 {deleteConfirm ? (
@@ -1703,7 +1940,7 @@ export function MainWindow({
                     onClick={() => setDeleteConfirm(true)}
                     disabled={!selectedId}
                     className="w-7 h-7 flex items-center justify-center rounded-lg text-ink-ghost hover:text-red-400 hover:bg-danger-bg transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
-                    title="删除笔记"
+                    title="删除便签"
                   >
                     <svg
                       width="13"
@@ -1748,7 +1985,7 @@ export function MainWindow({
                     contentRef.current?.focus();
                   }
                 }}
-                placeholder="无标题笔记"
+                placeholder="无标题便签"
                 disabled={!selectedId}
                 className="w-full text-[20px] font-display font-bold text-ink placeholder:text-ink-ghost/50 tracking-wide disabled:opacity-60"
               />
@@ -1778,12 +2015,61 @@ export function MainWindow({
                   {saveStateLabel[saveState]}
                 </span>
               </div>
+              {selectedId && !isExternal && (
+                <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                  {tags.map((tag) => (
+                    <span
+                      key={tag}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-mono bg-bamboo-mist text-bamboo cursor-default transition-colors hover:bg-bamboo-glow"
+                    >
+                      {tag}
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveTag(tag)}
+                        className="w-3.5 h-3.5 flex items-center justify-center rounded-full hover:bg-bamboo/20 transition-colors cursor-pointer"
+                        title="移除标签"
+                      >
+                        <svg width="8" height="8" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                          <path d="M3 3l6 6M9 3l-6 6" />
+                        </svg>
+                      </button>
+                    </span>
+                  ))}
+                  {showTagInput ? (
+                    <input
+                      type="text"
+                      value={tagInput}
+                      onChange={(e) => setTagInput(e.target.value)}
+                      onKeyDown={handleTagKeyDown}
+                      onBlur={() => {
+                        if (tagInput.trim()) handleAddTag();
+                        else setShowTagInput(false);
+                      }}
+                      placeholder="输入标签"
+                      autoFocus
+                      className="w-20 h-5 px-1.5 rounded-full text-[11px] font-mono bg-paper-warm border border-paper-deep/40 text-ink-soft placeholder:text-ink-ghost/50"
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setShowTagInput(true)}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] text-ink-ghost hover:text-bamboo hover:bg-bamboo-mist/50 border border-dashed border-ink-ghost/30 transition-colors cursor-pointer"
+                      title="添加标签"
+                    >
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                        <path d="M12 5v14M5 12h14" />
+                      </svg>
+                      添加标签
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
 
             <div key={viewMode} className="flex-1 flex min-h-0 animate-view-fade">
               {!selectedId && !isLoading ? (
                 <div className="flex-1 flex items-center justify-center text-[13px] text-ink-ghost">
-                  选择或新建一篇笔记
+                  选择或新建一篇便签
                 </div>
               ) : (
                 <>
@@ -1798,17 +2084,38 @@ export function MainWindow({
                       <div className="flex items-center gap-0.5 px-4 pt-2 pb-1 shrink-0">
                         {toolbarButtons.map((button) => (
                           <button
-                            key={button.label}
+                            key={button.title}
                             title={button.title}
                             onMouseDown={(e) => e.preventDefault()}
                             onClick={() => {
+                              if (button.action === "image") {
+                                void handleInsertImage();
+                                return;
+                              }
+                              if (button.action === "link") {
+                                handleInsertLink();
+                                return;
+                              }
                               if (contentRef.current) {
                                 applyFormat(contentRef.current, button.action, setContent, markDirty);
                               }
                             }}
-                            className={`w-6 h-6 flex items-center justify-center rounded text-[11px] text-ink-ghost hover:text-ink-faint hover:bg-paper-warm transition-all cursor-pointer ${button.style}`}
+                            className={`w-7 h-7 flex items-center justify-center rounded text-[13px] text-ink-ghost hover:text-ink-faint hover:bg-paper-warm transition-all cursor-pointer ${button.style}`}
                           >
-                            {button.label}
+                            {button.action === "image" ? (
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                                <circle cx="8.5" cy="8.5" r="1.5" />
+                                <polyline points="21 15 16 10 5 21" />
+                              </svg>
+                            ) : button.action === "link" ? (
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+                              </svg>
+                            ) : (
+                              button.label
+                            )}
                           </button>
                         ))}
                       </div>
@@ -1822,10 +2129,21 @@ export function MainWindow({
                             markDirty();
                           }}
                           className="w-full h-full leading-[1.9] text-ink-soft font-mono placeholder:text-ink-ghost/40"
-                          style={{ fontSize: `${settingsConfig?.fontSize ?? 14}px` }}
+                          style={{ fontSize: `${settingsConfig?.fontSize ?? 16}px` }}
                           placeholder="开始写作……"
                           spellCheck={false}
                           disabled={!selectedId}
+                          onKeyDown={handleKeyDown}
+                          onPaste={(event) => {
+                            const items = event.clipboardData?.items;
+                            if (items && items.length === 1 && items[0].type.startsWith("image/")) {
+                              const file = items[0].getAsFile();
+                              if (file) {
+                                event.preventDefault();
+                                void handleImagePaste(file);
+                              }
+                            }
+                          }}
                         />
                       </div>
                     </div>
@@ -1849,7 +2167,7 @@ export function MainWindow({
                           viewMode === "preview" ? "pt-3" : "pt-1"
                         }`}
                       >
-                        <MarkdownPreview content={content} fontSize={settingsConfig?.fontSize ?? 14} />
+                        <MarkdownPreview content={content} fontSize={settingsConfig?.fontSize ?? 16} />
                       </div>
                     </div>
                   )}

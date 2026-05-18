@@ -3,6 +3,7 @@ export interface NoteMetadata {
   title: string;
   fileName: string;
   category: string;
+  tags: string[];
   createdAt: string;
   updatedAt: string;
   wordCount: number;
@@ -17,6 +18,7 @@ export interface SaveNoteRequest {
   title: string;
   content: string;
   category: string;
+  tags: string[];
 }
 
 export interface ExternalFile {

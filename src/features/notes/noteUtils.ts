@@ -7,7 +7,7 @@ export function getDisplayTitle(note: Pick<NoteMetadata, "title" | "preview">): 
   const preview = note.preview.trim();
   if (preview) return preview.slice(0, 20);
 
-  return "无标题笔记";
+  return "无标题便签";
 }
 
 export function buildPreview(content: string): string {
@@ -28,6 +28,7 @@ export function metadataFromNote(note: Note): NoteMetadata {
     title: note.title,
     fileName: note.fileName,
     category: note.category,
+    tags: note.tags,
     createdAt: note.createdAt,
     updatedAt: note.updatedAt,
     wordCount: note.wordCount,
@@ -93,6 +94,7 @@ export function filterNotes(notes: NoteMetadata[], query: string): NoteMetadata[
       note.preview,
       note.fileName,
       getDisplayTitle(note),
+      ...(note.tags || []),
     ]
       .join(" ")
       .toLowerCase();

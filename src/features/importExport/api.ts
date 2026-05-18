@@ -38,7 +38,7 @@ export async function exportMarkdownNote(note: ExportableNote): Promise<boolean>
 }
 
 function markdownFileName(title: string): string {
-  const safeTitle = safeFileStem(title) || "无标题笔记";
+  const safeTitle = safeFileStem(title) || "无标题便签";
   return `${safeTitle}.md`;
 }
 

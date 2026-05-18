@@ -10,7 +10,8 @@ import {
   DEFAULT_TILE_COLOR,
   normalizeTileColor,
 } from "../features/settings/tileColor";
-import { applyTheme, watchSystemTheme } from "../features/settings/theme";
+import { applyTheme, watchSystemTheme, applyFontFamily, applyAppFontSize } from "../features/settings/theme";
+import { listSystemFonts } from "../features/settings/api";
 import { SlidingButtonGroup } from "./SlidingButtonGroup";
 
 const tileColorModes: Array<{ value: TileColorMode; label: string }> = [
@@ -43,6 +44,15 @@ export function SettingsPanel({
   onChooseNotesDir,
   onClose,
 }: SettingsPanelProps) {
+  const [systemFonts, setSystemFonts] = useState<string[]>([]);
+  const [fontDropdownOpen, setFontDropdownOpen] = useState(false);
+
+  useEffect(() => {
+    listSystemFonts()
+      .then((fonts) => setSystemFonts(fonts))
+      .catch(() => {});
+  }, []);
+
   const setConfigValue = <Key extends keyof AppConfig>(
     key: Key,
     value: AppConfig[Key],
@@ -94,7 +104,7 @@ export function SettingsPanel({
 
         <section className="space-y-2">
           <label className="block text-[11px] font-body text-ink-faint">
-            笔记目录
+            便签目录
           </label>
           <div className="flex gap-2">
             <input
@@ -135,12 +145,12 @@ export function SettingsPanel({
             onChange={(checked) => setConfigValue("autostart", checked)}
           />
           <ToggleRow
-            label="自动保存笔记"
+            label="自动保存便签"
             checked={config.noteAutoSave}
             onChange={(checked) => setConfigValue("noteAutoSave", checked)}
           />
           <ToggleRow
-            label="小窗笔记自动保存"
+            label="小窗便签自动保存"
             checked={config.noteSurfaceAutoSave}
             onChange={(checked) =>
               setConfigValue("noteSurfaceAutoSave", checked)
@@ -162,19 +172,46 @@ export function SettingsPanel({
           <div className="flex items-center gap-3 h-9 rounded-lg px-2.5 bg-paper-warm/45 border border-paper-deep/25">
             <input
               type="range"
-              min={8}
-              max={30}
+              min={10}
+              max={24}
               step={1}
-              value={config.fontSize ?? 14}
+              value={config.fontSize ?? 16}
               onChange={(event) =>
                 setConfigValue("fontSize", Number(event.target.value))
               }
               className="flex-1 h-1 accent-bamboo cursor-pointer appearance-none bg-transparent [&::-webkit-slider-runnable-track]:h-[3px] [&::-webkit-slider-runnable-track]:rounded-full [&::-webkit-slider-runnable-track]:bg-paper-deep/50 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-bamboo [&::-webkit-slider-thumb]:-mt-[4.5px] [&::-webkit-slider-thumb]:shadow-[0_1px_3px_rgba(0,0,0,0.15)]"
             />
             <span className="text-[12px] font-mono text-ink-soft tabular-nums w-8 text-right">
-              {config.fontSize ?? 14}px
+              {config.fontSize ?? 16}px
             </span>
           </div>
+        </section>
+
+        <section className="space-y-2">
+          <label className="block text-[11px] font-body text-ink-faint">
+            应用字号
+          </label>
+          <div className="flex items-center gap-3 h-9 rounded-lg px-2.5 bg-paper-warm/45 border border-paper-deep/25">
+            <input
+              type="range"
+              min={12}
+              max={18}
+              step={1}
+              value={config.appFontSize ?? 14}
+              onChange={(event) => {
+                const v = Number(event.target.value);
+                setConfigValue("appFontSize", v);
+                applyAppFontSize(v);
+              }}
+              className="flex-1 h-1 accent-bamboo cursor-pointer appearance-none bg-transparent [&::-webkit-slider-runnable-track]:h-[3px] [&::-webkit-slider-runnable-track]:rounded-full [&::-webkit-slider-runnable-track]:bg-paper-deep/50 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-bamboo [&::-webkit-slider-thumb]:-mt-[4.5px] [&::-webkit-slider-thumb]:shadow-[0_1px_3px_rgba(0,0,0,0.15)]"
+            />
+            <span className="text-[12px] font-mono text-ink-soft tabular-nums w-8 text-right">
+              {config.appFontSize ?? 14}px
+            </span>
+          </div>
+          <p className="text-[10px] text-ink-ghost font-body">
+            调整界面文字大小（不影响编辑器字号）
+          </p>
         </section>
 
         <section className="space-y-2">
@@ -237,6 +274,59 @@ export function SettingsPanel({
               </button>
             </div>
           )}
+        </section>
+
+        <section className="space-y-2">
+          <label className="block text-[11px] font-body text-ink-faint">
+            自定义字体
+          </label>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setFontDropdownOpen(!fontDropdownOpen)}
+              className="w-full h-10 rounded-lg px-3 bg-paper-warm/45 border border-paper-deep/25 focus:border-bamboo/50 focus:bg-cloud focus:outline-none font-body text-[13px] text-ink text-left transition-colors flex items-center justify-between"
+            >
+              <span className={config.fontFamily ? "text-ink" : "text-ink-ghost"}>
+                {config.fontFamily || "系统默认字体"}
+              </span>
+              <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" className={`text-ink-ghost transition-transform ${fontDropdownOpen ? "rotate-180" : ""}`}>
+                <path d="M3 5l3 3 3-3" />
+              </svg>
+            </button>
+            {fontDropdownOpen && (
+              <div className="absolute top-full mt-1 w-full max-h-48 overflow-y-auto rounded-lg bg-cloud border border-paper-deep/30 shadow-lg z-50">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setConfigValue("fontFamily", "");
+                    applyFontFamily("");
+                    setFontDropdownOpen(false);
+                  }}
+                  className={`w-full text-left px-3 py-1.5 text-[12px] font-body hover:bg-bamboo-mist/50 transition-colors cursor-pointer ${!config.fontFamily ? "text-bamboo font-medium" : "text-ink-soft"}`}
+                >
+                  系统默认字体
+                </button>
+                {systemFonts.map((font) => (
+                  <button
+                    key={font}
+                    type="button"
+                    onClick={() => {
+                      setConfigValue("fontFamily", font);
+                      applyFontFamily(font);
+                      setFontDropdownOpen(false);
+                    }}
+                    className={`w-full text-left px-3 py-1.5 text-[12px] font-body hover:bg-bamboo-mist/50 transition-colors cursor-pointer ${config.fontFamily === font ? "text-bamboo font-medium" : "text-ink-soft"}`}
+                    style={{ fontFamily: `"${font}", system-ui, sans-serif` }}
+                  >
+                    {font}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <p className="text-[10px] text-ink-ghost font-body">
+            选择系统中已安装的字体
+          </p>
         </section>
 
         <section className="space-y-2">

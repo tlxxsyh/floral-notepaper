@@ -5,7 +5,7 @@ import { Tile } from "./Tile";
 describe("Tile", () => {
   test("renders the confirmed tile design structure", () => {
     const markup = renderToStaticMarkup(
-      <Tile title="读书笔记" content={"满地都是六便士，\n他却抬头看见了月亮。"} />,
+      <Tile title="读书便签" content={"满地都是六便士，\n他却抬头看见了月亮。"} />,
     );
 
     expect(markup).toContain("rounded-xl");
@@ -18,7 +18,7 @@ describe("Tile", () => {
     expect(markup).toContain("font-size:15px");
     expect(markup).toContain("font-size:14px");
     expect(markup).toContain("leading-[1.8]");
-    expect(markup).toContain(">读书笔记<");
+    expect(markup).toContain(">读书便签<");
     expect(markup).toContain("满地都是六便士");
     expect(markup.match(/data-tile-corner-mark="true"/g)).toHaveLength(4);
   });

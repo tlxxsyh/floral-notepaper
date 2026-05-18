@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { MouseEvent } from "react";
 import {
+  copyAssetFile,
   createNote,
   getErrorMessage,
   getNote,
   listNotes,
+  saveAssetBytes,
   updateNote,
 } from "../features/notes/api";
 import type { Note, NoteMetadata } from "../features/notes/types";
@@ -15,7 +17,9 @@ import {
   metadataFromNote,
 } from "../features/notes/noteUtils";
 import { listen } from "@tauri-apps/api/event";
+import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { PhysicalSize } from "@tauri-apps/api/dpi";
 import {
   animateCurrentWindowBounds,
   getCurrentWindowBounds,
@@ -48,6 +52,8 @@ import type { NoteSurfaceMode } from "../features/windows/surfaceMode";
 import { Tile } from "./Tile";
 
 type OpenMode = "new" | "open";
+
+const NOTEPAD_SIZE_KEY = "shijie-notepad-size";
 
 interface NotePadProps {
   initialNoteId?: string;
@@ -118,6 +124,9 @@ export function NotePad({
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
+  const [tags, setTags] = useState<string[]>([]);
+  const [tagInput, setTagInput] = useState("");
+  const [showTagInput, setShowTagInput] = useState(false);
   const [hoveredNote, setHoveredNote] = useState<string | null>(null);
   const [status, setStatus] = useState("空");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -149,6 +158,7 @@ export function NotePad({
     setEditingNoteId(note.id);
     setTitle(note.title);
     setContent(note.content);
+    setTags(note.tags || []);
     setMode("new");
     setStatus("已打开");
   }, []);
@@ -203,13 +213,49 @@ export function NotePad({
         if (!cancelled) {
           hasEnteredOnce.current = true;
           void showCurrentWindow()
-            .then(() => contentRef.current?.focus())
+            .then(() => {
+              contentRef.current?.focus();
+              try {
+                const saved = localStorage.getItem(NOTEPAD_SIZE_KEY);
+                if (saved) {
+                  const size = JSON.parse(saved) as { width: number; height: number };
+                  getCurrentWindow().setSize(new PhysicalSize(size.width, size.height)).catch(() => {});
+                }
+              } catch {
+                /* ignore */
+              }
+            })
             .catch(() => undefined);
         }
       });
     });
     return () => {
       cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const onResize = ({ payload: size }: { payload: { width: number; height: number } }) => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        try {
+          localStorage.setItem(
+            NOTEPAD_SIZE_KEY,
+            JSON.stringify({ width: size.width, height: size.height }),
+          );
+        } catch {
+          /* ignore */
+        }
+      }, 500);
+    };
+
+    const unlistenPromise = getCurrentWindow().onResized(onResize);
+
+    return () => {
+      if (timer) clearTimeout(timer);
+      void unlistenPromise.then((fn) => fn());
     };
   }, []);
 
@@ -259,6 +305,7 @@ export function NotePad({
       setEditingNoteId(null);
       setTitle("");
       setContent("");
+      setTags([]);
       setMode("new");
       setStatus("空");
       setErrorMessage(null);
@@ -266,7 +313,18 @@ export function NotePad({
       setSurfaceMode("pad");
       void refreshNotes().catch(() => undefined);
       void showCurrentWindow()
-        .then(() => contentRef.current?.focus())
+        .then(() => {
+          contentRef.current?.focus();
+          try {
+            const saved = localStorage.getItem(NOTEPAD_SIZE_KEY);
+            if (saved) {
+              const size = JSON.parse(saved) as { width: number; height: number };
+              getCurrentWindow().setSize(new PhysicalSize(size.width, size.height)).catch(() => {});
+            }
+          } catch {
+            /* ignore */
+          }
+        })
         .catch(() => undefined);
     });
     return () => {
@@ -276,7 +334,7 @@ export function NotePad({
 
   const saveNote = useCallback(async () => {
     const existingCategory = notes.find((n) => n.id === editingNoteId)?.category ?? "";
-    const request = { title, content, category: existingCategory };
+    const request = { title, content, category: existingCategory, tags };
     const note = editingNoteId
       ? await updateNote(editingNoteId, request)
       : await createNote(request);
@@ -406,6 +464,103 @@ export function NotePad({
     }
   }, [content]);
 
+  const handleInsertImage = useCallback(async () => {
+    const filePath = await open({
+      multiple: false,
+      directory: false,
+      filters: [{ name: "图片", extensions: ["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"] }],
+    });
+    if (typeof filePath !== "string") return;
+
+    setErrorMessage(null);
+    try {
+      const relativePath = await copyAssetFile(filePath);
+      const imageMd = `\n![图片](${relativePath})\n`;
+      setContent((prev) => prev + imageMd);
+      setStatus("未保存");
+    } catch (error) {
+      setErrorMessage(getErrorMessage(error));
+    }
+  }, []);
+
+  const handleImagePaste = useCallback(async (file: File) => {
+    if (!file.type.startsWith("image/")) return false;
+    setErrorMessage(null);
+    try {
+      const buffer = await file.arrayBuffer();
+      const bytes = Array.from(new Uint8Array(buffer));
+      const relativePath = await saveAssetBytes(file.name, bytes);
+      const imageMd = `![${file.name}](${relativePath})`;
+      if (contentRef.current) {
+        const { selectionStart: start, selectionEnd: end } = contentRef.current;
+        const before = content.slice(0, start);
+        const after = content.slice(end);
+        const newContent = before + imageMd + after;
+        setContent(newContent);
+        setStatus("未保存");
+        requestAnimationFrame(() => {
+          contentRef.current?.focus();
+          const cursorPos = start + imageMd.length;
+          contentRef.current?.setSelectionRange(cursorPos, cursorPos);
+        });
+      } else {
+        setContent((prev) => prev + "\n" + imageMd + "\n");
+        setStatus("未保存");
+      }
+      return true;
+    } catch (error) {
+      setErrorMessage(getErrorMessage(error));
+      return false;
+    }
+  }, [content]);
+
+  const handleListKeyDown = useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key !== "Enter") return;
+    const textarea = event.currentTarget;
+    const { selectionStart: cursor } = textarea;
+    const lineStart = textarea.value.lastIndexOf("\n", cursor - 1) + 1;
+    const currentLine = textarea.value.slice(lineStart, cursor);
+
+    const ulMatch = currentLine.match(/^(\s*)([-*+])\s+(.+)/);
+    const olMatch = currentLine.match(/^(\s*)(\d+)[.)]\s+(.+)/);
+
+    if (ulMatch || olMatch) {
+      event.preventDefault();
+      const indent = ulMatch ? ulMatch[1] : olMatch![1];
+
+      if ((ulMatch && ulMatch[3].trim() === "") || (olMatch && olMatch![3].trim() === "")) {
+        const before = textarea.value.slice(0, lineStart);
+        const after = textarea.value.slice(cursor);
+        setContent(before + after);
+        setStatus("未保存");
+        requestAnimationFrame(() => {
+          textarea.focus();
+          textarea.setSelectionRange(lineStart, lineStart);
+        });
+        return;
+      }
+
+      let newLine: string;
+      if (ulMatch) {
+        newLine = `\n${indent}${ulMatch[2]} `;
+      } else {
+        const num = parseInt(olMatch![2], 10);
+        newLine = `\n${indent}${num + 1}. `;
+      }
+
+      const before = textarea.value.slice(0, cursor);
+      const after = textarea.value.slice(cursor);
+      const newContent = before + newLine + after;
+      const newCursor = cursor + newLine.length;
+      setContent(newContent);
+      setStatus("未保存");
+      requestAnimationFrame(() => {
+        textarea.focus();
+        textarea.setSelectionRange(newCursor, newCursor);
+      });
+    }
+  }, []);
+
   useEffect(() => {
     function handleSurfaceActionRequest(event: Event) {
       const action = surfaceActionFromEvent(event);
@@ -464,10 +619,44 @@ export function NotePad({
     setEditingNoteId(null);
     setTitle("");
     setContent("");
+    setTags([]);
+    setTagInput("");
+    setShowTagInput(false);
     setMode("new");
     setStatus("空");
     setErrorMessage(null);
   };
+
+  const handleAddTag = useCallback(() => {
+    const trimmed = tagInput.trim();
+    if (!trimmed || tags.includes(trimmed)) {
+      setTagInput("");
+      setShowTagInput(false);
+      return;
+    }
+    setTags((prev) => [...prev, trimmed]);
+    setTagInput("");
+    setShowTagInput(false);
+    setStatus("未保存");
+  }, [tagInput, tags]);
+
+  const handleRemoveTag = useCallback((tagToRemove: string) => {
+    setTags((prev) => prev.filter((t) => t !== tagToRemove));
+    setStatus("未保存");
+  }, []);
+
+  const handleTagKeyDown = useCallback((event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      handleAddTag();
+    } else if (event.key === "Escape") {
+      setTagInput("");
+      setShowTagInput(false);
+    } else if (event.key === "Backspace" && tagInput === "" && tags.length > 0) {
+      setTags((prev) => prev.slice(0, -1));
+      setStatus("未保存");
+    }
+  }, [handleAddTag, tagInput, tags]);
 
   const isTile = surfaceMode === "tile";
   const tileNoteId = editingNoteId ?? initialNoteId ?? "";
@@ -590,6 +779,50 @@ export function NotePad({
                   style={{ fontSize: `${surfaceFontSize}px` }}
                 />
 
+                <div className="flex items-center gap-1.5 mb-2 flex-wrap shrink-0">
+                  {tags.map((tag) => (
+                    <span
+                      key={tag}
+                      className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-mono bg-bamboo-mist text-bamboo"
+                    >
+                      {tag}
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveTag(tag)}
+                        className="w-3 h-3 flex items-center justify-center rounded-full hover:bg-bamboo/20 transition-colors cursor-pointer"
+                      >
+                        <svg width="7" height="7" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                          <path d="M3 3l6 6M9 3l-6 6" />
+                        </svg>
+                      </button>
+                    </span>
+                  ))}
+                  {showTagInput ? (
+                    <input
+                      type="text"
+                      value={tagInput}
+                      onChange={(e) => setTagInput(e.target.value)}
+                      onKeyDown={handleTagKeyDown}
+                      onBlur={() => {
+                        if (tagInput.trim()) handleAddTag();
+                        else setShowTagInput(false);
+                      }}
+                      placeholder="输入标签"
+                      autoFocus
+                      className="w-16 h-5 px-1.5 rounded-full text-[10px] font-mono bg-paper-warm/70 border border-paper-deep/40 text-ink-soft placeholder:text-ink-ghost/50"
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setShowTagInput(true)}
+                      className="inline-flex items-center justify-center w-5 h-5 rounded-full text-[12px] text-ink-ghost hover:text-ink-faint hover:bg-paper-warm transition-colors cursor-pointer"
+                      title="添加标签"
+                    >
+                      +
+                    </button>
+                  )}
+                </div>
+
                 <textarea
                   ref={contentRef}
                   value={content}
@@ -600,6 +833,17 @@ export function NotePad({
                   placeholder="写点什么……"
                   className="w-full flex-1 min-h-0 pb-2 leading-relaxed text-ink-soft font-body placeholder:text-ink-ghost/50"
                   style={{ fontSize: `${surfaceFontSize}px` }}
+                  onKeyDown={handleListKeyDown}
+                  onPaste={(event) => {
+                    const items = event.clipboardData?.items;
+                    if (items && items.length === 1 && items[0].type.startsWith("image/")) {
+                      const file = items[0].getAsFile();
+                      if (file) {
+                        event.preventDefault();
+                        void handleImagePaste(file);
+                      }
+                    }
+                  }}
                 />
 
                 <div className="flex items-center justify-between mt-auto pt-2 border-t border-paper-deep/30 shrink-0">
@@ -612,6 +856,17 @@ export function NotePad({
                       className="px-4 py-1.5 text-[12px] text-ink-faint hover:text-ink-soft rounded-lg hover:bg-paper-warm transition-all duration-200 cursor-pointer"
                     >
                       清空
+                    </button>
+                    <button
+                      onClick={() => void handleInsertImage()}
+                      className="px-3 py-1.5 text-ink-ghost hover:text-ink-faint rounded-lg hover:bg-paper-warm transition-all duration-200 cursor-pointer"
+                      title="插入图片"
+                    >
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                        <circle cx="8.5" cy="8.5" r="1.5" />
+                        <polyline points="21 15 16 10 5 21" />
+                      </svg>
                     </button>
                     <button
                       onClick={() => void handleSave()}
@@ -667,7 +922,7 @@ export function NotePad({
                         </div>
                       </div>
                       <p className="text-[12px] text-ink-ghost leading-relaxed line-clamp-1 group-hover:text-ink-faint transition-colors">
-                        {note.preview || "空白笔记"}
+                        {note.preview || "空白便签"}
                       </p>
                       {hoveredNote === note.id && (
                         <div className="mt-1.5 h-px bg-bamboo/10 transition-all duration-300" />
@@ -676,7 +931,7 @@ export function NotePad({
                   ))}
                   {notes.length === 0 && (
                     <div className="px-4 py-8 text-center text-[12px] text-ink-ghost">
-                      还没有可打开的笔记
+                      还没有可打开的便签
                     </div>
                   )}
                 </div>

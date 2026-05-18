@@ -1,3 +1,4 @@
+use base64::Engine;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -30,6 +31,10 @@ pub struct AppConfig {
     pub surface_font_size: u32,
     #[serde(default = "default_external_file_auto_save")]
     pub external_file_auto_save: bool,
+    #[serde(default = "default_font_family")]
+    pub font_family: String,
+    #[serde(default = "default_app_font_size")]
+    pub app_font_size: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -39,6 +44,8 @@ pub struct SaveNoteRequest {
     pub content: String,
     #[serde(default)]
     pub category: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -49,6 +56,8 @@ pub struct NoteMetadata {
     pub file_name: String,
     #[serde(default)]
     pub category: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub word_count: usize,
@@ -63,6 +72,8 @@ pub struct Note {
     pub file_name: String,
     #[serde(default)]
     pub category: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub word_count: usize,
@@ -115,6 +126,12 @@ impl From<tauri::Error> for AppError {
     }
 }
 
+impl From<regex::Error> for AppError {
+    fn from(error: regex::Error) -> Self {
+        Self::new("regex", error.to_string())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 struct MetadataFile {
@@ -143,11 +160,11 @@ fn default_base_dir() -> Result<PathBuf, AppError> {
         return Ok(PathBuf::from(home)
             .join("Library")
             .join("Application Support")
-            .join("花笺"));
+            .join("拾芥"));
     }
 
     if let Ok(user_profile) = env::var("USERPROFILE") {
-        return Ok(PathBuf::from(user_profile).join("Documents").join("花笺"));
+        return Ok(PathBuf::from(user_profile).join("Documents").join("拾芥"));
     }
 
     Ok(env::current_dir()?.join("data"))
@@ -212,6 +229,7 @@ impl NoteStore {
             title: metadata.title,
             file_name: metadata.file_name,
             category: metadata.category,
+            tags: metadata.tags,
             created_at: metadata.created_at,
             updated_at: metadata.updated_at,
             word_count: metadata.word_count,
@@ -235,6 +253,7 @@ impl NoteStore {
             title: request.title,
             file_name: file_name.clone(),
             category: category.clone(),
+            tags: request.tags.clone(),
             created_at: now,
             updated_at: now,
             word_count,
@@ -251,6 +270,7 @@ impl NoteStore {
             title: metadata.title,
             file_name,
             category,
+            tags: request.tags,
             created_at: now,
             updated_at: now,
             word_count,
@@ -290,6 +310,7 @@ impl NoteStore {
         note.title = request.title;
         note.file_name = new_file_name.clone();
         note.category = new_category.clone();
+        note.tags = request.tags.clone();
         note.updated_at = now;
         note.word_count = word_count;
         note.preview = preview(&request.content);
@@ -299,6 +320,7 @@ impl NoteStore {
             title: note.title.clone(),
             file_name: note.file_name.clone(),
             category: new_category,
+            tags: request.tags,
             created_at: note.created_at,
             updated_at: note.updated_at,
             word_count: note.word_count,
@@ -322,7 +344,48 @@ impl NoteStore {
         if path.exists() {
             fs::remove_file(&path)?;
         }
-        self.save_metadata(&metadata_file)
+        self.save_metadata(&metadata_file)?;
+
+        let _ = self.delete_unused_assets();
+        Ok(())
+    }
+
+    pub fn delete_unused_assets(&self) -> Result<(), AppError> {
+        let assets_dir = self.assets_dir()?;
+        if !assets_dir.exists() {
+            return Ok(());
+        }
+
+        let metadata = self.load_metadata()?;
+        let mut used_assets = std::collections::HashSet::new();
+
+        for note in &metadata.notes {
+            let note_path = self.note_path_in_category(&note.file_name, &note.category);
+            if !note_path.exists() {
+                continue;
+            }
+            let content = fs::read_to_string(&note_path)?;
+            let re = regex::Regex::new(r"!\[.*?\]\((assets/[^)]+)\)")?;
+            for cap in re.captures_iter(&content) {
+                if let Some(asset_path) = cap.get(1) {
+                    let file_name = asset_path.as_str().strip_prefix("assets/").unwrap_or(asset_path.as_str());
+                    used_assets.insert(file_name.to_string());
+                }
+            }
+        }
+
+        for entry in fs::read_dir(&assets_dir)? {
+            let entry = entry?;
+            if !entry.path().is_file() {
+                continue;
+            }
+            let file_name = entry.file_name().to_string_lossy().to_string();
+            if !used_assets.contains(&file_name) {
+                let _ = fs::remove_file(entry.path());
+            }
+        }
+
+        Ok(())
     }
 
     pub fn import_markdown_file(&self, path: &Path, category: &str) -> Result<Note, AppError> {
@@ -336,6 +399,7 @@ impl NoteStore {
             title,
             content,
             category: category.to_string(),
+            tags: Vec::new(),
         })
     }
 
@@ -355,7 +419,10 @@ impl NoteStore {
         for entry in fs::read_dir(&notes_dir)? {
             let entry = entry?;
             if entry.path().is_dir() {
-                categories.push(entry.file_name().to_string_lossy().to_string());
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name != "assets" {
+                    categories.push(name);
+                }
             }
         }
         categories.sort();
@@ -440,6 +507,63 @@ impl NoteStore {
         Ok(())
     }
 
+    pub fn list_tags(&self) -> Result<Vec<String>, AppError> {
+        self.ensure_storage()?;
+        let metadata = self.load_metadata()?;
+        let mut tags: Vec<String> = metadata
+            .notes
+            .iter()
+            .flat_map(|note| note.tags.clone())
+            .collect();
+        tags.sort();
+        tags.dedup();
+        Ok(tags)
+    }
+
+    pub fn get_note_path(&self, id: &str) -> Result<PathBuf, AppError> {
+        self.ensure_storage()?;
+        let metadata = self.find_metadata(id)?;
+        Ok(self.note_path_in_category(&metadata.file_name, &metadata.category))
+    }
+
+    pub fn assets_dir(&self) -> Result<PathBuf, AppError> {
+        Ok(self.notes_dir()?.join("assets"))
+    }
+
+    pub fn save_asset_bytes(&self, name: &str, data: &[u8]) -> Result<String, AppError> {
+        let assets = self.assets_dir()?;
+        fs::create_dir_all(&assets)?;
+        let file_name = format!("{}_{}", Uuid::new_v4(), name);
+        let path = assets.join(&file_name);
+        fs::write(&path, data)?;
+        Ok(format!("assets/{}", file_name))
+    }
+
+    pub fn copy_asset_file(&self, source: &Path) -> Result<String, AppError> {
+        let assets = self.assets_dir()?;
+        fs::create_dir_all(&assets)?;
+        let original_name = source
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("image.png");
+        let file_name = format!("{}_{}", Uuid::new_v4(), original_name);
+        let path = assets.join(&file_name);
+        fs::copy(source, &path)?;
+        Ok(format!("assets/{}", file_name))
+    }
+
+    pub fn asset_base64(&self, relative_path: &str) -> Result<String, AppError> {
+        let assets = self.assets_dir()?;
+        let file_name = relative_path.strip_prefix("assets/").unwrap_or(relative_path);
+        let path = assets.join(file_name);
+        let data = fs::read(&path).map_err(|e| {
+            AppError::new("assetReadError", format!("无法读取图片: {}", e))
+        })?;
+        let mime = mime_from_extension(file_name);
+        let encoded = base64::engine::general_purpose::STANDARD.encode(&data);
+        Ok(format!("data:{};base64,{}", mime, encoded))
+    }
+
     pub fn move_note_to_category(
         &self,
         id: &str,
@@ -491,6 +615,8 @@ impl NoteStore {
             font_size: default_font_size(),
             surface_font_size: default_surface_font_size(),
             external_file_auto_save: default_external_file_auto_save(),
+            font_family: default_font_family(),
+            app_font_size: default_app_font_size(),
         }
     }
 
@@ -620,6 +746,7 @@ impl NoteStore {
                 title,
                 file_name,
                 category: category.to_string(),
+                tags: Vec::new(),
                 created_at: modified,
                 updated_at: modified,
                 word_count: count_words(&content),
@@ -731,7 +858,7 @@ fn imported_markdown_title(path: &Path, content: &str) -> String {
         .and_then(|file_stem| file_stem.to_str())
         .map(str::trim)
         .filter(|title| !title.is_empty())
-        .unwrap_or("导入笔记")
+        .unwrap_or("导入便签")
         .to_string()
 }
 
@@ -756,15 +883,36 @@ fn default_theme() -> String {
 }
 
 fn default_font_size() -> u32 {
-    14
+    16
 }
 
 fn default_surface_font_size() -> u32 {
-    14
+    16
 }
 
 fn default_external_file_auto_save() -> bool {
     true
+}
+
+fn default_font_family() -> String {
+    String::new()
+}
+
+fn default_app_font_size() -> u32 {
+    14
+}
+
+fn mime_from_extension(path: &str) -> &'static str {
+    let ext = path.rsplit('.').next().unwrap_or("");
+    match ext.to_lowercase().as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "bmp" => "image/bmp",
+        "svg" => "image/svg+xml",
+        _ => "application/octet-stream",
+    }
 }
 
 #[cfg(test)]
@@ -775,7 +923,7 @@ mod tests {
     fn test_root(name: &str) -> PathBuf {
         let base = std::env::var_os("FLORAL_NOTEPAPER_TEST_TEMP_DIR")
             .map(PathBuf::from)
-            .unwrap_or_else(|| std::env::temp_dir().join("floral-notepaper-rust-tests"));
+            .unwrap_or_else(|| std::env::temp_dir().join("shijie-rust-tests"));
         let root = base.join(name);
         if root.exists() {
             fs::remove_dir_all(&root).expect("remove stale test root");
@@ -793,6 +941,7 @@ mod tests {
                 title: "A/B:Test".into(),
                 content: "hello\nworld".into(),
                 category: String::new(),
+                tags: Vec::new(),
             })
             .expect("create note");
 
@@ -817,6 +966,7 @@ mod tests {
                     title: "".into(),
                     content: "# 新标题\nsecond line".into(),
                     category: String::new(),
+                    tags: Vec::new(),
                 },
             )
             .expect("update note");
@@ -838,6 +988,7 @@ mod tests {
                 title: "第一条".into(),
                 content: "# 第一条\n正文".into(),
                 category: String::new(),
+                tags: Vec::new(),
             })
             .expect("create first");
         let second = store
@@ -845,6 +996,7 @@ mod tests {
                 title: "第二条".into(),
                 content: "第二条正文".into(),
                 category: String::new(),
+                tags: Vec::new(),
             })
             .expect("create second");
 
@@ -898,6 +1050,8 @@ mod tests {
             font_size: 16,
             surface_font_size: 16,
             external_file_auto_save: true,
+            font_family: String::new(),
+            app_font_size: 14,
         };
 
         store.save_config(saved.clone()).expect("save config");
@@ -987,6 +1141,7 @@ mod tests {
                 title: "导出标题".into(),
                 content: content.into(),
                 category: String::new(),
+                tags: Vec::new(),
             })
             .expect("create note");
         let export_path = root.join("exports").join("导出.md");

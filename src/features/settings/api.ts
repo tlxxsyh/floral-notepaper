@@ -26,3 +26,7 @@ export function normalizeViewMode(value: string): ViewMode {
 
   return "split";
 }
+
+export function listSystemFonts(): Promise<string[]> {
+  return invoke("list_system_fonts");
+}

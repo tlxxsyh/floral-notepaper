@@ -6,8 +6,13 @@ use std::path::PathBuf;
 use tauri::{AppHandle, Emitter};
 
 #[tauri::command]
+fn list_system_fonts() -> Result<Vec<String>, AppError> {
+    desktop::list_system_fonts()
+}
+
+#[tauri::command]
 fn app_name() -> &'static str {
-    "花笺"
+    "拾芥"
 }
 
 #[tauri::command]
@@ -123,6 +128,65 @@ fn categories_delete(app: AppHandle, name: String) -> Result<(), AppError> {
 }
 
 #[tauri::command]
+fn tags_list() -> Result<Vec<String>, AppError> {
+    default_store()?.list_tags()
+}
+
+#[tauri::command]
+fn save_asset_bytes(name: String, data: Vec<u8>) -> Result<String, AppError> {
+    default_store()?.save_asset_bytes(&name, &data)
+}
+
+#[tauri::command]
+fn copy_asset_file(source: String) -> Result<String, AppError> {
+    default_store()?.copy_asset_file(&std::path::PathBuf::from(source))
+}
+
+#[tauri::command]
+fn asset_base64(relative_path: String) -> Result<String, AppError> {
+    default_store()?.asset_base64(&relative_path)
+}
+
+#[tauri::command]
+fn open_in_explorer(id: String) -> Result<(), AppError> {
+    let path = default_store()?.get_note_path(&id)?;
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg("/select,")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| AppError {
+                code: "openExplorer".into(),
+                message: format!("打开资源管理器失败: {}", e),
+            })?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg("-R")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| AppError {
+                code: "openExplorer".into(),
+                message: format!("打开访达失败: {}", e),
+            })?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let parent = path.parent().unwrap_or_else(|| std::path::Path::new("/"));
+        std::process::Command::new("xdg-open")
+            .arg(parent)
+            .spawn()
+            .map_err(|e| AppError {
+                code: "openExplorer".into(),
+                message: format!("打开文件管理器失败: {}", e),
+            })?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
 fn notes_move_category(
     app: AppHandle,
     id: String,
@@ -199,6 +263,7 @@ pub fn run() {
         .on_window_event(desktop::handle_window_event)
         .invoke_handler(tauri::generate_handler![
             app_name,
+            list_system_fonts,
             notes_list,
             notes_get,
             notes_create,
@@ -214,6 +279,11 @@ pub fn run() {
             categories_create,
             categories_rename,
             categories_delete,
+            tags_list,
+            save_asset_bytes,
+            copy_asset_file,
+            asset_base64,
+            open_in_explorer,
             config_get,
             config_save,
             open_notepad_window,

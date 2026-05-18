@@ -3,7 +3,7 @@ import { describe, expect, test, vi } from "vitest";
 import { SettingsPanel } from "./SettingsPanel";
 
 const config = {
-  notesDir: "D:\\Notes\\花笺",
+  notesDir: "D:\\Notes\\拾芥",
   globalShortcut: "Ctrl+Space",
   closeToTray: true,
   autostart: false,
@@ -16,6 +16,8 @@ const config = {
   fontSize: 14,
   surfaceFontSize: 14,
   externalFileAutoSave: true,
+  fontFamily: "",
+  appFontSize: 14,
 };
 
 describe("SettingsPanel", () => {
@@ -30,13 +32,13 @@ describe("SettingsPanel", () => {
     );
 
     expect(markup).toContain("应用设置");
-    expect(markup).toContain("D:\\Notes\\花笺");
+    expect(markup).toContain("D:\\Notes\\拾芥");
     expect(markup).toContain("选择文件夹");
     expect(markup).toContain("Ctrl+Space");
     expect(markup).toContain("关闭到托盘");
     expect(markup).toContain("开机自启");
-    expect(markup).toContain("自动保存笔记");
-    expect(markup).toContain("小窗笔记自动保存");
+    expect(markup).toContain("自动保存便签");
+    expect(markup).toContain("小窗便签自动保存");
     expect(markup).toContain("磁贴颜色");
     expect(markup).toContain("跟随主题");
     expect(markup).toContain("自定义");

@@ -53,6 +53,26 @@ export function getFileModifiedTime(path: string): Promise<number> {
   return invoke("get_file_modified_time", { path });
 }
 
+export function listTags(): Promise<string[]> {
+  return invoke("tags_list");
+}
+
+export function saveAssetBytes(name: string, data: number[]): Promise<string> {
+  return invoke("save_asset_bytes", { name, data });
+}
+
+export function copyAssetFile(source: string): Promise<string> {
+  return invoke("copy_asset_file", { source });
+}
+
+export function getAssetBase64(relativePath: string): Promise<string> {
+  return invoke("asset_base64", { relativePath });
+}
+
+export function openInExplorer(id: string): Promise<void> {
+  return invoke("open_in_explorer", { id });
+}
+
 export function getErrorMessage(error: unknown): string {
   if (typeof error === "string") return error;
   if (error && typeof error === "object" && "message" in error) {

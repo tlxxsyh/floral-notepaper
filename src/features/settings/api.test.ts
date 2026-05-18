@@ -41,7 +41,10 @@ describe("settings api", () => {
       fontSize: 14,
       surfaceFontSize: 14,
       externalFileAutoSave: true,
+      fontFamily: "",
+      appFontSize: 14,
     };
+
     mockedInvoke.mockResolvedValue(config);
 
     await expect(getConfig()).resolves.toBe(config);
@@ -64,6 +67,8 @@ describe("settings api", () => {
       fontSize: 16,
       surfaceFontSize: 16,
       externalFileAutoSave: true,
+      fontFamily: "",
+      appFontSize: 16,
     };
     mockedInvoke.mockResolvedValue(config);
 

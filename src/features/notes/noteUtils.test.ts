@@ -11,9 +11,10 @@ import type { NoteMetadata } from "./types";
 const notes: NoteMetadata[] = [
   {
     id: "1",
-    title: "读书笔记",
+    title: "读书便签",
     fileName: "1.md",
     category: "",
+    tags: [],
     createdAt: "2026-04-28T01:00:00Z",
     updatedAt: "2026-04-28T01:00:00Z",
     wordCount: 20,
@@ -24,6 +25,7 @@ const notes: NoteMetadata[] = [
     title: "",
     fileName: "2.md",
     category: "日常",
+    tags: [],
     createdAt: "2026-04-28T02:00:00Z",
     updatedAt: "2026-04-28T02:00:00Z",
     wordCount: 12,
@@ -33,9 +35,9 @@ const notes: NoteMetadata[] = [
 
 describe("note utilities", () => {
   it("uses title, preview, then untitled fallback for display title", () => {
-    expect(getDisplayTitle(notes[0])).toBe("读书笔记");
+    expect(getDisplayTitle(notes[0])).toBe("读书便签");
     expect(getDisplayTitle(notes[1])).toBe("周末采购清单");
-    expect(getDisplayTitle({ ...notes[1], preview: "" })).toBe("无标题笔记");
+    expect(getDisplayTitle({ ...notes[1], preview: "" })).toBe("无标题便签");
   });
 
   it("builds compact previews and counts non-whitespace characters", () => {

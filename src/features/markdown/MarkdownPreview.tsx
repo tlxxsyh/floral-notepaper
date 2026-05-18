@@ -1,10 +1,11 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { Components } from "react-markdown";
+import { getAssetBase64 } from "../notes/api";
 import "katex/dist/katex.min.css";
 
 function CodeBlock({ children }: { children: React.ReactNode }) {
@@ -43,6 +44,19 @@ function extractText(node: React.ReactNode): string {
   return "";
 }
 
+function AssetImage({ src, alt, className }: { src: string; alt?: string; className?: string }) {
+  const [base64, setBase64] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    getAssetBase64(src).then((b64) => {
+      if (!cancelled) setBase64(b64);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [src]);
+  if (!base64) return <span className={className}>{alt ?? "加载中…"}</span>;
+  return <img src={base64} alt={alt} className={className} />;
+}
+
 interface MarkdownPreviewProps {
   content: string;
   fontSize?: number;
@@ -51,111 +65,143 @@ interface MarkdownPreviewProps {
 const remarkPlugins = [remarkGfm, remarkMath];
 const rehypePlugins = [rehypeKatex];
 
-const components: Components = {
-  h1: ({ children }) => (
-    <h1 className="text-[22px] font-display font-bold text-ink mt-6 mb-4 tracking-wide">
-      {children}
-    </h1>
-  ),
-  h2: ({ children }) => (
-    <h2 className="text-[17px] font-display font-bold text-ink mt-7 mb-3 tracking-wide">
-      {children}
-    </h2>
-  ),
-  h3: ({ children }) => (
-    <h3 className="text-[15px] font-display font-bold text-ink mt-5 mb-2 tracking-wide">
-      {children}
-    </h3>
-  ),
-  h4: ({ children }) => (
-    <h4 className="text-[14px] font-display font-semibold text-ink mt-4 mb-2 tracking-wide">
-      {children}
-    </h4>
-  ),
-  p: ({ children }) => (
-    <p className="text-ink-soft leading-[1.9]">{children}</p>
-  ),
-  strong: ({ children }) => (
-    <strong className="font-semibold text-ink">{children}</strong>
-  ),
-  em: ({ children }) => (
-    <em className="italic text-bamboo-light">{children}</em>
-  ),
-  blockquote: ({ children }) => (
-    <blockquote className="border-l-2 border-bamboo/40 pl-4 my-3 text-ink-soft/80 italic leading-[1.9]">
-      {children}
-    </blockquote>
-  ),
-  ul: ({ children }) => (
-    <ul className="ml-4 text-ink-soft leading-[1.9] list-disc list-outside marker:text-bamboo/40">
-      {children}
-    </ul>
-  ),
-  ol: ({ children }) => (
-    <ol className="ml-4 text-ink-soft leading-[1.9] list-decimal list-outside marker:text-bamboo/50 marker:font-mono marker:text-[12px]">
-      {children}
-    </ol>
-  ),
-  li: ({ children }) => (
-    <li className="text-ink-soft leading-[1.9]">{children}</li>
-  ),
-  hr: () => (
-    <hr className="my-6 border-none h-px bg-gradient-to-r from-transparent via-paper-deep to-transparent" />
-  ),
-  code: ({ className, children }) => {
-    const isBlock = className?.startsWith("language-") || String(children).includes("\n");
-    if (isBlock) {
+export function MarkdownPreview({ content, fontSize = 14 }: MarkdownPreviewProps) {
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
+
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setLightboxSrc(null);
+    }
+    if (lightboxSrc) {
+      document.addEventListener("keydown", handleKeyDown);
+      return () => document.removeEventListener("keydown", handleKeyDown);
+    }
+  }, [lightboxSrc]);
+
+  const components: Components = {
+    h1: ({ children }) => (
+      <h1 className="text-[22px] font-display font-bold text-ink mt-6 mb-4 tracking-wide">
+        {children}
+      </h1>
+    ),
+    h2: ({ children }) => (
+      <h2 className="text-[17px] font-display font-bold text-ink mt-7 mb-3 tracking-wide">
+        {children}
+      </h2>
+    ),
+    h3: ({ children }) => (
+      <h3 className="text-[15px] font-display font-bold text-ink mt-5 mb-2 tracking-wide">
+        {children}
+      </h3>
+    ),
+    h4: ({ children }) => (
+      <h4 className="text-[14px] font-display font-semibold text-ink mt-4 mb-2 tracking-wide">
+        {children}
+      </h4>
+    ),
+    p: ({ children }) => (
+      <p className="text-ink-soft leading-[1.9]">{children}</p>
+    ),
+    strong: ({ children }) => (
+      <strong className="font-semibold text-ink">{children}</strong>
+    ),
+    em: ({ children }) => (
+      <em className="italic text-bamboo-light">{children}</em>
+    ),
+    blockquote: ({ children }) => (
+      <blockquote className="border-l-2 border-bamboo/40 pl-4 my-3 text-ink-soft/80 italic leading-[1.9]">
+        {children}
+      </blockquote>
+    ),
+    ul: ({ children }) => (
+      <ul className="ml-4 text-ink-soft leading-[1.9] list-disc list-outside marker:text-bamboo/40">
+        {children}
+      </ul>
+    ),
+    ol: ({ children }) => (
+      <ol className="ml-4 text-ink-soft leading-[1.9] list-decimal list-outside marker:text-bamboo/50 marker:font-mono marker:text-[12px]">
+        {children}
+      </ol>
+    ),
+    li: ({ children }) => (
+      <li className="text-ink-soft leading-[1.9]">{children}</li>
+    ),
+    hr: () => (
+      <hr className="my-6 border-none h-px bg-gradient-to-r from-transparent via-paper-deep to-transparent" />
+    ),
+    code: ({ className, children }) => {
+      const isBlock = className?.startsWith("language-") || String(children).includes("\n");
+      if (isBlock) {
+        return (
+          <code className="text-[12px] font-mono text-ink-soft leading-[1.8] whitespace-pre">
+            {children}
+          </code>
+        );
+      }
       return (
-        <code className="text-[12px] font-mono text-ink-soft leading-[1.8] whitespace-pre">
+        <code className="px-1.5 py-0.5 text-[12px] font-mono bg-paper-warm rounded text-bamboo">
           {children}
         </code>
       );
-    }
-    return (
-      <code className="px-1.5 py-0.5 text-[12px] font-mono bg-paper-warm rounded text-bamboo">
+    },
+    pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
+    a: ({ href, children }) => (
+      <a
+        href={href}
+        onClick={(e) => {
+          e.preventDefault();
+          if (href) openUrl(href);
+        }}
+        className="text-bamboo hover:text-bamboo-light underline underline-offset-2 cursor-pointer"
+      >
         {children}
-      </code>
-    );
-  },
-  pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
-  a: ({ href, children }) => (
-    <a
-      href={href}
-      onClick={(e) => {
-        e.preventDefault();
-        if (href) openUrl(href);
-      }}
-      className="text-bamboo hover:text-bamboo-light underline underline-offset-2 cursor-pointer"
-    >
-      {children}
-    </a>
-  ),
-  table: ({ children }) => (
-    <div className="my-3 overflow-x-auto">
-      <table className="w-full text-[13px] border-collapse">{children}</table>
-    </div>
-  ),
-  th: ({ children }) => (
-    <th className="text-left px-3 py-1.5 border-b border-paper-deep/30 font-semibold text-ink text-[12px]">
-      {children}
-    </th>
-  ),
-  td: ({ children }) => (
-    <td className="px-3 py-1.5 border-b border-paper-deep/15 text-ink-soft">
-      {children}
-    </td>
-  ),
-  input: ({ checked, ...props }) => (
-    <input
-      {...props}
-      checked={checked}
-      disabled
-      className="mr-1.5 accent-bamboo"
-    />
-  ),
-};
+      </a>
+    ),
+    table: ({ children }) => (
+      <div className="my-3 overflow-x-auto">
+        <table className="w-full text-[13px] border-collapse">{children}</table>
+      </div>
+    ),
+    th: ({ children }) => (
+      <th className="text-left px-3 py-1.5 border-b border-paper-deep/30 font-semibold text-ink text-[12px]">
+        {children}
+      </th>
+    ),
+    td: ({ children }) => (
+      <td className="px-3 py-1.5 border-b border-paper-deep/15 text-ink-soft">
+        {children}
+      </td>
+    ),
+    input: ({ checked, ...props }) => (
+      <input
+        {...props}
+        checked={checked}
+        disabled
+        className="mr-1.5 accent-bamboo"
+      />
+    ),
+    img: ({ src, alt, className }) => {
+      if (!src) return null;
+      const handleClick = () => {
+        if (src.startsWith("data:")) {
+          setLightboxSrc(src);
+        }
+      };
+      if (src.startsWith("data:")) {
+        return (
+          <img
+            src={src}
+            alt={alt}
+            className={className}
+            onClick={handleClick}
+            style={{ cursor: "zoom-in" }}
+          />
+        );
+      }
+      return <AssetImage src={src} alt={alt} className={className} />;
+    },
+  };
 
-export function MarkdownPreview({ content, fontSize = 14 }: MarkdownPreviewProps) {
   return (
     <div className="max-w-[560px] font-body" style={{ fontSize: `${fontSize}px` }}>
       {content.trim() ? (
@@ -163,7 +209,21 @@ export function MarkdownPreview({ content, fontSize = 14 }: MarkdownPreviewProps
           {content}
         </Markdown>
       ) : (
-        <p className="text-ink-ghost leading-[1.9]">预览区会显示当前笔记内容</p>
+        <p className="text-ink-ghost leading-[1.9]">预览区会显示当前便签内容</p>
+      )}
+
+      {lightboxSrc && (
+        <div
+          className="fixed inset-0 z-[9999] bg-ink/80 backdrop-blur-sm flex items-center justify-center cursor-zoom-out animate-fade-in"
+          onClick={() => setLightboxSrc(null)}
+        >
+          <img
+            src={lightboxSrc}
+            alt=""
+            className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
       )}
     </div>
   );

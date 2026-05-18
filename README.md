@@ -1,10 +1,10 @@
-# 花笺
+# 拾芥
 
-花笺是一款基于 Tauri 2 + React 构建的轻量、优雅、现代化的本地便签工具。
+拾芥是一款基于 Tauri 2 + React 构建的轻量、优雅、现代化的本地便签工具。
 
-## 为什么选择花笺
+## 为什么选择拾芥
 
-市面上现有的笔记或便签软件，要么功能繁重、上手门槛高，要么界面陈旧、久未更新。花笺因此而生，其特点是轻便、随呼随用，同时提供现代化的界面与舒适的编辑体验。
+市面上现有的笔记或便签软件，要么功能繁重、上手门槛高，要么界面陈旧、久未更新。拾芥因此而生，其特点是轻便、随呼随用，同时提供现代化的界面与舒适的编辑体验。
 
 ## 功能
 
@@ -31,7 +31,7 @@
 
 ## 下载安装
 
-前往 [GitHub Releases](https://github.com/Achilng/floral-notepaper/releases) 下载最新版本。
+前往 [GitHub Releases](https://github.com/tlxxsyh/floral-notepaper/releases) 下载最新版本。
 
 > 目前仅在 Windows 11 上测试，其他系统版本的兼容性尚未验证。
 
@@ -46,20 +46,10 @@
 ### 步骤
 
 ```bash
-git clone https://github.com/Achilng/floral-notepaper.git
+git clone https://github.com/tlxxsyh/floral-notepaper.git
 cd floral-notepaper
 
 npm install
 
 # 开发模式
 npm run tauri dev
-
-# 构建发布版本
-npm run tauri build
-```
-
-构建产物输出到 `src-tauri/target/release/bundle/`。
-
-## 许可证
-
-[MIT](LICENSE)

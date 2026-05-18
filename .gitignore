@@ -22,7 +22,9 @@ x86/
 node_modules/
 dist/
 src-tauri/target/
+src-tauri/target-release/
 src-tauri/gen/
+*.log
 
 ## agent文档
 PLAN.md

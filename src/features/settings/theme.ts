@@ -37,3 +37,18 @@ export function watchSystemTheme(option: ThemeOption): () => void {
   systemListener = cleanup;
   return cleanup;
 }
+
+export function applyFontFamily(fontFamily: string): void {
+  const root = document.documentElement;
+  const defaultBody = `"Noto Sans SC", "Source Han Sans SC", system-ui, sans-serif`;
+  if (fontFamily) {
+    root.style.setProperty("--font-body", `"${fontFamily}", ${defaultBody}`);
+  } else {
+    root.style.removeProperty("--font-body");
+  }
+}
+
+export function applyAppFontSize(fontSize: number): void {
+  const root = document.documentElement;
+  root.style.setProperty("--app-font-size", `${fontSize}px`);
+}

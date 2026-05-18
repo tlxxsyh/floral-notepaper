@@ -1,4 +1,4 @@
-export type NoteContextMenuAction = "export" | "move" | "delete";
+export type NoteContextMenuAction = "export" | "move" | "openInExplorer" | "delete";
 
 export interface NoteContextMenuItem {
   action: NoteContextMenuAction;
@@ -9,5 +9,6 @@ export interface NoteContextMenuItem {
 export const noteContextMenuItems: NoteContextMenuItem[] = [
   { action: "export", label: "导出 Markdown" },
   { action: "move", label: "移动到分类…" },
-  { action: "delete", label: "删除笔记", tone: "danger" },
+  { action: "openInExplorer", label: "在文件资源管理器中打开" },
+  { action: "delete", label: "删除便签", tone: "danger" },
 ];

@@ -24,10 +24,10 @@ describe("importExport api", () => {
   });
 
   test("imports the selected markdown path through Rust", async () => {
-    mockedOpen.mockResolvedValue("D:\\notes\\外部笔记.md");
+    mockedOpen.mockResolvedValue("D:\\notes\\外部便签.md");
     mockedInvoke.mockResolvedValue({
       id: "note-1",
-      title: "外部笔记",
+      title: "外部便签",
       fileName: "note-1.md",
       createdAt: "2026-04-28T00:00:00Z",
       updatedAt: "2026-04-28T00:00:00Z",
@@ -43,7 +43,7 @@ describe("importExport api", () => {
       filters: [{ name: "Markdown", extensions: ["md"] }],
     });
     expect(invoke).toHaveBeenCalledWith("notes_import_markdown", {
-      path: "D:\\notes\\外部笔记.md",
+      path: "D:\\notes\\外部便签.md",
       category: "",
     });
     expect(note?.id).toBe("note-1");
@@ -57,20 +57,20 @@ describe("importExport api", () => {
   });
 
   test("exports a note to the selected markdown path", async () => {
-    mockedSave.mockResolvedValue("D:\\exports\\读书笔记.md");
+    mockedSave.mockResolvedValue("D:\\exports\\读书便签.md");
     mockedInvoke.mockResolvedValue(undefined);
 
     await expect(
-      exportMarkdownNote({ id: "note-1", title: "读书笔记" }),
+      exportMarkdownNote({ id: "note-1", title: "读书便签" }),
     ).resolves.toBe(true);
 
     expect(save).toHaveBeenCalledWith({
-      defaultPath: "读书笔记.md",
+      defaultPath: "读书便签.md",
       filters: [{ name: "Markdown", extensions: ["md"] }],
     });
     expect(invoke).toHaveBeenCalledWith("notes_export_markdown", {
       id: "note-1",
-      path: "D:\\exports\\读书笔记.md",
+      path: "D:\\exports\\读书便签.md",
     });
   });
 
@@ -85,7 +85,7 @@ describe("importExport api", () => {
       filters: [{ name: "Markdown", extensions: ["md"] }],
     });
     expect(save).toHaveBeenNthCalledWith(2, {
-      defaultPath: "无标题笔记.md",
+      defaultPath: "无标题便签.md",
       filters: [{ name: "Markdown", extensions: ["md"] }],
     });
     expect(invoke).not.toHaveBeenCalled();

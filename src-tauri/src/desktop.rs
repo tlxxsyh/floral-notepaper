@@ -441,7 +441,7 @@ fn setup_tray(app: &mut App) -> Result<(), Box<dyn Error>> {
                 .expect("missing default window icon")
                 .clone(),
         )
-        .tooltip("花笺")
+        .tooltip("拾芥")
         .menu(&menu)
         .show_menu_on_left_click(cfg!(target_os = "macos"))
         .on_menu_event(|app, event| {
@@ -502,7 +502,7 @@ pub fn show_main_window(app: &AppHandle) -> Result<(), AppError> {
         MAIN_WINDOW_LABEL,
         WindowOpenOptions {
             url: "index.html".to_string(),
-            title: "花笺".to_string(),
+            title: "拾芥".to_string(),
             specs: WindowSizeSpec {
                 width: 1180.0,
                 height: 760.0,
@@ -542,7 +542,7 @@ fn open_notepad_window_now(
         &label,
         WindowOpenOptions {
             url,
-            title: "花笺便签".to_string(),
+            title: "拾芥便签".to_string(),
             specs,
             decorations: false,
             always_on_top: true,
@@ -628,7 +628,7 @@ fn prewarm_notepad(app: &AppHandle) -> Result<(), AppError> {
         &label,
         WebviewUrl::App("index.html?view=notepad&standby=1".into()),
     )
-    .title("花笺便签")
+    .title("拾芥便签")
     .inner_size(specs.width, specs.height)
     .min_inner_size(specs.min_width, specs.min_height)
     .resizable(true)
@@ -670,7 +670,7 @@ fn open_tile_window_now(
         &label,
         WindowOpenOptions {
             url,
-            title: "花笺磁贴".to_string(),
+            title: "拾芥磁贴".to_string(),
             specs,
             decorations: false,
             always_on_top: true,
@@ -768,6 +768,18 @@ fn sanitize_label_part(value: &str) -> String {
 
 fn load_config() -> Result<AppConfig, AppError> {
     default_store()?.load_config()
+}
+
+pub fn list_system_fonts() -> Result<Vec<String>, AppError> {
+    let mut db = fontdb::Database::new();
+    db.load_system_fonts();
+    let mut families: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for face in db.faces() {
+        for (name, _) in &face.families {
+            families.insert(name.clone());
+        }
+    }
+    Ok(families.into_iter().collect())
 }
 
 fn close_to_tray_enabled() -> bool {
@@ -1204,6 +1216,8 @@ mod tests {
             font_size: 14,
             surface_font_size: 14,
             external_file_auto_save: true,
+            font_family: String::new(),
+            app_font_size: 14,
         };
         let next = AppConfig {
             notes_dir: "D:\\other-notes".into(),
@@ -1219,6 +1233,8 @@ mod tests {
             font_size: 16,
             surface_font_size: 16,
             external_file_auto_save: true,
+            font_family: String::new(),
+            app_font_size: 14,
         };
 
         assert_eq!(

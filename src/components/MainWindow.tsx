@@ -275,6 +275,10 @@ export function MainWindow({
   const [content, setContent] = useState("");
   const [title, setTitle] = useState("");
   const [saveState, setSaveState] = useState<SaveState>("idle");
+  const markDirtyRef = useRef<() => void>(() => {});
+  markDirtyRef.current = () => {
+    if (selectedId) setSaveState("dirty");
+  };
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -658,7 +662,7 @@ export function MainWindow({
       const relativePath = await copyAssetFile(filePath);
       const imageMd = `\n![图片](${relativePath})\n`;
       setContent((prev) => prev + imageMd);
-      markDirty();
+      markDirtyRef.current();
     } catch (error) {
       setErrorMessage(getErrorMessage(error));
     }
@@ -678,7 +682,7 @@ export function MainWindow({
         const after = content.slice(end);
         const newContent = before + imageMd + after;
         setContent(newContent);
-        markDirty();
+        markDirtyRef.current();
         requestAnimationFrame(() => {
           contentRef.current?.focus();
           const cursorPos = start + imageMd.length;
@@ -686,7 +690,7 @@ export function MainWindow({
         });
       } else {
         setContent((prev) => prev + "\n" + imageMd + "\n");
-        markDirty();
+        markDirtyRef.current();
       }
       return true;
     } catch (error) {
@@ -1103,9 +1107,7 @@ export function MainWindow({
     });
   };
 
-  const markDirty = () => {
-    if (selectedId) setSaveState("dirty");
-  };
+  const markDirty = () => markDirtyRef.current();
 
   const handleInsertLink = useCallback(() => {
     if (!contentRef.current) return;
@@ -1121,8 +1123,8 @@ export function MainWindow({
         contentRef.current.setSelectionRange(cursorPos - 1, cursorPos - 1);
       }
     }, 0);
-    markDirty();
-  }, [markDirty]);
+    markDirtyRef.current();
+  }, []);
 
   const handleUndo = () => {
     if (!selectedId) return;
@@ -2120,7 +2122,7 @@ export function MainWindow({
                         ))}
                       </div>
 
-                      <div className="flex-1 overflow-y-auto px-5 pb-4">
+                      <div className="flex-1 px-5 pb-4">
                         <textarea
                           ref={contentRef}
                           value={content}
@@ -2136,11 +2138,15 @@ export function MainWindow({
                           onKeyDown={handleKeyDown}
                           onPaste={(event) => {
                             const items = event.clipboardData?.items;
-                            if (items && items.length === 1 && items[0].type.startsWith("image/")) {
-                              const file = items[0].getAsFile();
-                              if (file) {
-                                event.preventDefault();
-                                void handleImagePaste(file);
+                            if (!items) return;
+                            for (let i = 0; i < items.length; i++) {
+                              if (items[i].type.startsWith("image/")) {
+                                const file = items[i].getAsFile();
+                                if (file) {
+                                  event.preventDefault();
+                                  void handleImagePaste(file);
+                                  return;
+                                }
                               }
                             }
                           }}

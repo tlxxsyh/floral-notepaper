@@ -836,11 +836,15 @@ export function NotePad({
                   onKeyDown={handleListKeyDown}
                   onPaste={(event) => {
                     const items = event.clipboardData?.items;
-                    if (items && items.length === 1 && items[0].type.startsWith("image/")) {
-                      const file = items[0].getAsFile();
-                      if (file) {
-                        event.preventDefault();
-                        void handleImagePaste(file);
+                    if (!items) return;
+                    for (let i = 0; i < items.length; i++) {
+                      if (items[i].type.startsWith("image/")) {
+                        const file = items[i].getAsFile();
+                        if (file) {
+                          event.preventDefault();
+                          void handleImagePaste(file);
+                          return;
+                        }
                       }
                     }
                   }}

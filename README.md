@@ -1,3 +1,7 @@
+# 说明
+
+本软件是在 [花笺](https://github.com/Achilng/floral-notepaper) 的基础上进行的改动，增加了tag标签、图片、链接、自定义字体等功能，同时优化了界面UI布局。
+
 # 拾芥
 
 拾芥是一款基于 Tauri 2 + React 构建的轻量、优雅、现代化的本地便签工具。

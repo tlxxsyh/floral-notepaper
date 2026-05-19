@@ -2122,7 +2122,7 @@ export function MainWindow({
                         ))}
                       </div>
 
-                      <div className="flex-1 px-5 pb-4">
+                      <div className={`flex-1 ${viewMode === "split" ? "pr-1 pl-5" : "px-5"} pb-4`}>
                         <textarea
                           ref={contentRef}
                           value={content}
@@ -2169,8 +2169,8 @@ export function MainWindow({
                         </div>
                       )}
                       <div
-                        className={`flex-1 overflow-y-auto px-6 pb-6 ${
-                          viewMode === "preview" ? "pt-3" : "pt-1"
+                        className={`flex-1 overflow-y-auto pb-6 ${
+                          viewMode === "split" ? "pl-4 pr-6 pt-1" : "px-6 pt-3"
                         }`}
                       >
                         <MarkdownPreview content={content} fontSize={settingsConfig?.fontSize ?? 16} />

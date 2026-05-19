@@ -44,12 +44,19 @@ function extractText(node: React.ReactNode): string {
   return "";
 }
 
+const imageCache = new Map<string, string>();
+
 function AssetImage({ src, alt, className }: { src: string; alt?: string; className?: string }) {
-  const [base64, setBase64] = useState<string | null>(null);
+  const [base64, setBase64] = useState<string | null>(() => imageCache.get(src) ?? null);
   useEffect(() => {
+    const cached = imageCache.get(src);
+    if (cached) { setBase64(cached); return; }
     let cancelled = false;
     getAssetBase64(src).then((b64) => {
-      if (!cancelled) setBase64(b64);
+      if (!cancelled) {
+        imageCache.set(src, b64);
+        setBase64(b64);
+      }
     }).catch(() => {});
     return () => { cancelled = true; };
   }, [src]);
